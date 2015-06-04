@@ -41,18 +41,18 @@ fits = FitsArchive()
 
 ## local settings:
 
-dir_root = "/Users/ttshimiz/Research/Thesis/data/Herschel/"
+dir_root = "/ricci5nb/tshimizu/"
 path = dir_root+"L1_HIPE13/"
 
 ### number of observations:
 n_obs = 313
 
 use_calib_tree = "spire_cal_13_1"
-
+cal = spireCal(pool="spire_cal_13_1")
 ## observations:
 
 # Load in all of the OBSIDs for the BAT AGN
-f_obsid = open('/Users/ttshimiz/Github/spire-catalog-photometry/bat_agn_spire_obsids.txt', 'r')
+f_obsid = open('/ricci9nb/tshimizu/Github/spire-catalog-photometry/bat_agn_spire_obsids.txt', 'r')
 lines = f_obsid.readlines()[0]
 lines = lines.split('\r')
 list_obsids = [int(x.split('\t')[-1]) for x in lines]
@@ -62,7 +62,7 @@ list_names = [x.split('\t')[0] for x in lines]
 
 source_prev = 'none'
 vscan_prev = 0.
-for i_obs in range(n_obs):
+for i_obs in range(65, n_obs):
 	##
 	num_obsid = list_obsids[i_obs]
 	source = list_names[i_obs]
@@ -95,7 +95,8 @@ for i_obs in range(n_obs):
 	##
 	calVersion = obs.calibration.version
 	print "calibration version : "+calVersion
-	if (calVersion != use_calib_tree): continue
+	if (calVersion != use_calib_tree):
+		obs.calibration.update(cal)
 	##
 	##
 	## Extract the calibration products from the observation context:
@@ -123,25 +124,14 @@ for i_obs in range(n_obs):
 	bbids = level0_5.getBbids(0xa103)
 	nsubscans = len(bbids)
 	if nrep == 0:
-        	nscans = 1
-		nlegsperscan_nom = nsubscans
-		nlegs_max = nsubscans
-	elif (obs.meta["obsMode"].value == "Large Map"):
-        	nscans = 2*nrep
-		nlegsperscan_nom = obs.meta["numScanLinesNom"].value
-		nlegsperscan_cross = obs.meta["numScanLinesOrth"].value
-		nlegs_max = max([nlegsperscan_nom, nlegsperscan_cross])
-	elif (obs.meta["obsMode"].value == "Small Map"):
+		nscans = 1
+		nlegsperscan = nsubscans
+	else:
 		nscans = 2*nrep
-		nlegsperscan_nom = nsubscans/nscans
-		nlegs_max = nsubscans
+		nlegsperscan = nsubscans/nscans
 	print "number of scans: ", nscans
 	print "number of subscans: ", nsubscans
-	if (nrep == 0) or (obs.meta["obsMode"].value == "Small Map"):
-		print "number of legs per scan = ", nlegsperscan_nom
-	else:
-		print "number of legs per scan (nominal) = ", nlegsperscan_nom
-		print "number of legs per scan (cross) = ", nlegsperscan_cross
+	print "number of legs per scan = ", nlegsperscan
 	##
 	##
 	## Create Level1 context:
@@ -246,40 +236,35 @@ for i_obs in range(n_obs):
 	print
 	## Save level 1 data as fits files:
 	##
-	if nlegs_max > 99:
+	if nlegsperscan > 99:
 		prefix_1="00"
-        	prefix_2="0"
+		prefix_2="0"
 	else:
 		prefix_1="0"
-        	prefix_2=""
-	##
-	nlegs_saved = 0L
+		prefix_2=""
+
 	for iscan in range(nscans):
-        	scan = first_scan_num + iscan
-        	if scan < 10:
+		scan = first_scan_num + iscan
+		if scan < 10:
 			str_scan = "0"+str(scan)
-        	else:
+		else:
 			str_scan = str(scan)
 		root_filename = path_processed+"level1_scan"+str_scan
-		##
-		if (iscan %2 == 0) or (obs.meta['obsMode'].value == 'Small Map'):
-			nlegsperscan = nlegsperscan_nom
-		else:
-			nlegsperscan = nlegsperscan_cross
+#
 		for ileg in range(nlegsperscan):
-			bbid = ileg + nlegs_saved
+			bbid = ileg+iscan*nlegsperscan
 			product = level1_allscans.getProduct(bbid)
-                	subs = bbid+1
-                	if subs < 10:
+			subs = bbid+1
+			if subs < 10:
 				str_subs = prefix_1+str(subs)
-			elif subs < 100:
-				str_subs = prefix_2+str(subs)
 			else:
-				str_subs = str(subs)
+				if subs < 100:
+					str_subs = prefix_2+str(subs)
+				else:
+					str_subs = str(subs)
 			filename = root_filename+"_leg"+str_subs+".fits"
-			fits.save(filename, product)
+			fits.save(filename,product)
 			print filename
-		nlegs_saved = nlegs_saved + nlegsperscan
 
 
 ### END OF SCRIPT
