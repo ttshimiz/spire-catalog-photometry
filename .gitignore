@@ -1,3 +1,6 @@
 planck-maps/
 *.sav*.py
 *~
+results_06-16-2015/
+*.pyc
+*.swp
