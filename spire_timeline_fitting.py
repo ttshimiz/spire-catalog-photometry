@@ -1,6 +1,6 @@
 #Script to run the timeline fitter on the BAT sources
 
-github_dir = '/Users/ttshimiz/Github/'
+github_dir = '/ricci9nb/tshimizu/Github/'
 # Upload file with OBSIDs
 file = open(github_dir+'spire-catalog-photometry/bat_agn_spire_obsids.txt', 'r')
 lines_obsid = file.read().splitlines()
@@ -28,7 +28,7 @@ for i in range(len(lines_obsid)):
 	cl = lines_class[i].split(',')[1]
 
 	obsid = int((lines_obsid[i].split()[1]))
-
+	print name
 	obs = getObservation(obsid, useHsa=True)
 	
 	# Use different settings for sources in Cirrus dominated regions
@@ -81,10 +81,10 @@ for i in range(len(lines_obsid)):
 	dec_350 = timeline_350['sources']['dec'].data[0]
 	rchi2_350 = timeline_350['sources']['reducedChiSquare'].data[0]
 
-	flux_500 = timeline_250['sources']['flux'].data[0]
-	flux_err_500 = timeline_250['sources']['fluxPlusErr'].data[0]
-	fwhm_500 = timeline_250['sources']['sigma'].data[0]*3600*2.3548
-	fwhm_err_500 = timeline_250['sources']['sigmaErr'].data[0]*3600*2.3548
+	flux_500 = timeline_500['sources']['flux'].data[0]
+	flux_err_500 = timeline_500['sources']['fluxPlusErr'].data[0]
+	fwhm_500 = timeline_500['sources']['sigma'].data[0]*3600*2.3548
+	fwhm_err_500 = timeline_500['sources']['sigmaErr'].data[0]*3600*2.3548
 	ra_500 = timeline_500['sources']['ra'].data[0]
 	dec_500 = timeline_500['sources']['dec'].data[0]
 	rchi2_500 = timeline_500['sources']['reducedChiSquare'].data[0]
@@ -92,3 +92,4 @@ for i in range(len(lines_obsid)):
 	fn_results.write(name+'\t'+str(ra_250)+'\t'+str(dec_250)+'\t'+str(flux_250)+'\t'+str(flux_err_250)+'\t'+str(fwhm_250)+'\t'+str(fwhm_err_250)+'\t'+str(rchi2_250)+'\t'+
                          str(ra_350)+'\t'+str(dec_350)+'\t'+str(flux_350)+'\t'+str(flux_err_350)+'\t'+str(fwhm_350)+'\t'+str(fwhm_err_350)+'\t'+str(rchi2_350)+'\t'+
                          str(ra_500)+'\t'+str(dec_500)+'\t'+str(flux_500)+'\t'+str(flux_err_500)+'\t'+str(fwhm_500)+'\t'+str(fwhm_err_500)+'\t'+str(rchi2_500)+'\n')
+fn_results.close()
