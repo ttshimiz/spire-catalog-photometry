@@ -1,7 +1,7 @@
 # Standard scientific imports
 import numpy as np
 import matplotlib.pyplot as plt
-import pandas as pd
+#import pandas as pd
 
 from scipy.special import hyp2f1
 from mmm import mmm
@@ -16,6 +16,7 @@ from astropy.convolution import Gaussian2DKernel
 
 # Photutils imports
 from photutils import detect_sources, segment_properties, aperture_photometry, remove_segments
+from photutils import detect_sources, segment_properties, aperture_photometry
 from photutils import CircularAperture, EllipticalAperture
 from photutils import SkyCircularAperture, SkyEllipticalAperture
 from photutils import CircularAnnulus, EllipticalAnnulus
@@ -31,14 +32,23 @@ import datetime as dt
 import pickle
 
 # Global variables
-PIX_SIZES = {'PSW':4.50, 'PMW': 6.25, 'PLW': 9.00}
-FWHM = {'PSW':17.6, 'PMW': 24.0, 'PLW': 35.0}
+PIX_SIZES = {'PACS70':1.4, 'PACS100':1.70, 'PACS160':2.85,
+             'PSW':4.50, 'PMW': 6.25, 'PLW': 9.00}
+FWHM = {'PACS70':5.72, 'PACS100':6.89, 'PACS160':12.08,
+        'PSW':17.6, 'PMW': 24.0, 'PLW': 35.0}
 BEAM_AREAS = {'PSW': 469.7, 'PMW': 831.7, 'PLW': 1793.5}
-PS_SRC_APS = {'PSW': 22., 'PMW': 30., 'PLW': 42.}
-PS_BKG_AP = {'r_in': 60., 'r_out': 90.}
+PS_SRC_APS = {'PACS70':12., 'PACS100':12, 'PACS160': 22.,
+              'PSW': 22., 'PMW': 30., 'PLW': 42.}
+PS_BKG_AP = {'PACS70':{'r_in': 20., 'r_out': 25.},
+             'PACS100':{'r_in': 20., 'r_out': 25.},
+             'PACS160':{'r_in': 24., 'r_out': 28.},
+             'PSW':{'r_in': 60., 'r_out': 90.},
+             'PMW':{'r_in': 60., 'r_out': 90.},
+             'PLW':{'r_in': 60., 'r_out': 90.}}
 AP_CORR = {'PSW': 1.2697, 'PMW': 1.2271, 'PLW': 1.2194}
-CALIBRATION_ERR = 0.065
-WAVES = {'PSW': 250, 'PMW': 350, 'PLW': 500}
+CALIBRATION_ERR = 0.05
+WAVES = {'PACS70': 70, 'PACS100': 100, 'PACS160': 160,
+         'PSW': 250, 'PMW': 350, 'PLW': 500}
 
 # Directories
 bat_dir = '/Users/ttshimiz/Github/bat-data/'
@@ -68,20 +78,20 @@ def estimate_bkg(image, clip=3.0, snr=2.0, npix=5, tol=1e-6, max_iter=10):
     perc_change = np.abs(im_med0 - im_med)/ im_med
     
     if perc_change > tol:
-    	im_med0 = im_med
+        im_med0 = im_med
         for i in range(max_iter):
  
-    	    thresh = im_med + snr*im_std
+            thresh = im_med + snr*im_std
             segm_img = detect_sources(image, thresh, npixels=npix)
             mask = segm_img.astype(np.bool) | nanmask
             im_mean, im_med, im_std = sigma_clipped_stats(image, sigma=clip, mask=mask)
             perc_change = np.abs(im_med0 - im_med)/ im_med
 
             if perc_change < tol:
-            	break
+                break
             else:
-            	im_med0 = im_med
-            	
+                im_med0 = im_med
+                
     return im_med, im_std
 
 
@@ -101,7 +111,7 @@ def find_bat_source(coord_bat, props, rdist):
     else:
         return None
 
-def create_spire_aperture(prop, filter, pclass, extent=3.5, coord_bat=None, wcs=None):
+def create_aperture(prop, filter, pclass, extent=3.5, coord_bat=None, wcs=None):
     
     if prop is None:
         position = wcs.all_world2pix([[coord_bat.ra.value, coord_bat.dec.value]], 0)
@@ -115,12 +125,6 @@ def create_spire_aperture(prop, filter, pclass, extent=3.5, coord_bat=None, wcs=
         theta = prop.orientation.value
 
         if sa > PS_SRC_APS[filter]/PIX_SIZES[filter]:
-            #sa = 73.18676088595068/PIX_SIZES[filter]
-            #sb = 55.698816943915894/PIX_SIZES[filter]
-            #theta = 0.8222198355132048
-            #position = [99.62383, 129.10227]
-            
-            #position = wcs.all_world2pix([[coord_bat.ra.value, coord_bat.dec.value]], 0)
             ap = EllipticalAperture(position, sa, sb, theta=theta)
             type = 'extended'
         else:
@@ -130,7 +134,6 @@ def create_spire_aperture(prop, filter, pclass, extent=3.5, coord_bat=None, wcs=
     elif pclass == 'P':
         
         position = [prop.xcentroid.value, prop.ycentroid.value]
-        #position = [139.80168263145808, 180.98729420351651]
         ap = CircularAperture(position, PS_SRC_APS[filter]/PIX_SIZES[filter])
         type = 'point'
     
@@ -138,7 +141,7 @@ def create_spire_aperture(prop, filter, pclass, extent=3.5, coord_bat=None, wcs=
 
     
 def calc_bkg_rms(ap, image, type, filter, src_ap_area, mask=None, min_ap=6):
-
+    
     rpsrc = PS_SRC_APS[filter]/PIX_SIZES[filter]
 
     if (type == 'point') | (type == 'fixed'):
@@ -148,9 +151,7 @@ def calc_bkg_rms(ap, image, type, filter, src_ap_area, mask=None, min_ap=6):
         aback = ap.a_in + rpsrc
         bback = ap.b_in + rpsrc
         ap_theta = ap.theta
-    
-#    aback = 2*ap.a_in
-#    bback = 2*ap.b_in
+
     ecirc = ellip_circumference(aback, bback)
     diam = 2*rpsrc
     
@@ -160,7 +161,6 @@ def calc_bkg_rms(ap, image, type, filter, src_ap_area, mask=None, min_ap=6):
     
     # Use a minimum of 6 apertures
     naps = np.max([naps, min_ap])
-    #naps = 6
     
     theta_back = np.linspace(0, 2*np.pi, naps, endpoint=False)
     
@@ -169,24 +169,22 @@ def calc_bkg_rms(ap, image, type, filter, src_ap_area, mask=None, min_ap=6):
 
     # Create the background apertures and calculate flux within each
     bkg_aps = CircularAperture(np.vstack([x,y]).T, rpsrc)
-    flux_bkg = aperture_photometry(image, bkg_aps, mask=None)
-    flux_bkg = flux_bkg['aperture_sum']
-    #flux_bkg, area_bkg = calc_masked_aperture(bkg_aps, image.data, method='sum', mask=mask)
-    #flux_bkg_adj = flux_bkg/area_bkg * src_ap_area
-    flux_bkg_adj = flux_bkg/bkg_aps.area() * src_ap_area
-    print flux_bkg_adj
-	
-	# Use sigma-clipping to determine the RMS of the background
-	# Scale to the area of the source aperture
+    flux_bkg, area_bkg = calc_masked_aperture(bkg_aps, image.data, method='sum', mask=mask)
+    flux_bkg_adj = flux_bkg/area_bkg * src_ap_area
+
+    # Use sigma-clipping to determine the RMS of the background
+    # Scale to the area of the source aperture
     me, md, sd = sigma_clipped_stats(flux_bkg_adj, sigma=3)
-    #bkg_rms = sd/bkg_aps.area()*ap.area()
     bkg_rms = sd
     
     return bkg_rms, bkg_aps
 
 
 def prep_image(im, filt):
-
+    
+    if im.header['ZUNITs'] == 'MJy/sr':
+        im.data = im.data/im.header['JANSCALE']
+        
     im.data *= im.header['PFOV']**2/BEAM_AREAS[filt]
     im.header['BUNIT'] = 'Jy/pixel'
     
@@ -315,16 +313,16 @@ def find_aperture_extent(image, position, semi_a, semi_b, theta, bkg=0, mask=Non
         
     return ex
      
-def spire_aperture_photometry(ap, image, error, type, filter, pclass='E', bkg=0.0, mask=None,
+def herschel_aperture_photometry(ap, image, error, type, filter, pclass='E', bkg=0.0, mask=None,
                               ellip_ann_fac=1.5):
-	
+    
     image.data = np.array(image.data, dtype=np.float)
     error = np.array(error, dtype=np.float)    
     
     # Create a background annulus aperture
     if (type == 'point') | (type == 'fixed'):
-        
-        bkg_ap = CircularAnnulus(ap.positions, r_in=PS_BKG_AP['r_in']/PIX_SIZES[filter], r_out=PS_BKG_AP['r_out']/PIX_SIZES[filter])
+            
+        bkg_ap = CircularAnnulus(ap.positions, r_in=PS_BKG_AP[filter]['r_in']/PIX_SIZES[filter], r_out=PS_BKG_AP[filter]['r_out']/PIX_SIZES[filter])
         
     elif type == 'extended':
     
@@ -332,7 +330,7 @@ def spire_aperture_photometry(ap, image, error, type, filter, pclass='E', bkg=0.
                                    b_out=(ap.b+3)*ellip_ann_fac, theta=ap.theta)
     
     if pclass == 'C':
-        bkg_ap = CircularAnnulus(ap.positions, r_in=PS_SRC_APS[filter]/PIX_SIZES[filter], r_out=(PS_SRC_APS[filter]+30.)/PIX_SIZES[filter])
+        bkg_ap = CircularAnnulus(ap.positions, r_in=PS_SRC_APS[filter]/PIX_SIZES[filter], r_out=(PS_SRC_APS[filter]*2)/PIX_SIZES[filter])
     
     # Run photometry
     flux_tbl = aperture_photometry(image, ap, error=error, mask=mask)
@@ -387,9 +385,9 @@ def plot_aperture_photometry(image, apertures, filter, global_bkg=0, stretch='ar
     y_c = src_ap.positions[0][1]
     ra_c, dec_c = fig.pixel2world(x_c+1, y_c+1)
     if isinstance(bkg_ann, EllipticalAnnulus):
-    	radius = (bkg_ann.a_out*PIX_SIZES[filter] + PS_SRC_APS[filter])/3600.
+        radius = (bkg_ann.a_out*PIX_SIZES[filter] + PS_SRC_APS[filter])/3600.
     else:
-        radius = (PS_BKG_AP['r_out'] + PS_SRC_APS[filter]*1.5)/3600.
+        radius = (PS_BKG_AP[filter]['r_out'] + PS_SRC_APS[filter]*1.5)/3600.
     fig.recenter(ra_c, dec_c, radius=radius)
 
     # Plot the apertures
@@ -435,12 +433,123 @@ def plot_aperture_photometry(image, apertures, filter, global_bkg=0, stretch='ar
         fig.show_markers(plot_bat_loc[0], plot_bat_loc[1], marker='+', color='r', s=200, lw=1.5)
     
     return fig
+ 
+ 
+def run_single_source(imfile, errfile, filter, true_pos, find_source=True, pclass='E',
+                      extent=3.5, plot=True, name='Source'):
+                      
+    print 'Aperture photometry for ',name,' in Herschel filter ',filter
+    
+    # Load the data
+    print 'Loading the data...'
+    if imfile != errfile:
+        hdu_image = pyf.open(imfile)[0]
+        hdu_err = pyf.open(errfile)[0]
+    else:
+        data = pyf.getdata(imfile)
+        hdr = pyf.getheader(imfile)
+        hdr.remove('NAXIS3')
+        hdr['NAXIS'] = 2
+        hdu_image = pyf.PrimaryHDU(data=data[0], header=hdr)
+        hdu_err = pyf.PrimaryHDU(data=data[1], header=hdr)
+    
+    # Convert to Jy/pixel
+    if ((filter == 'PSW') | (filter == 'PMW') | (filter == 'PLW')):
+        print 'SPIRE image units being converted to Jy/pixel...'
+        hdu_image = prep_image(hdu_image, filter)
+        hdu_err = prep_image(hdu_err, filter) 
+
+    # Calculate the global background
+    print 'Calculating the global background...'
+    im = hdu_image.data
+    im_med, im_std = estimate_bkg(im)
+    print 'Background median = ', im_med
+    print 'Background rms = ', im_std
+    
+    # Use a 1.5 sigma threshold to detect the BAT source
+    thresh = im_med + 1.5*im_std
+    segm_img = detect_sources(im, thresh, npixels=5)
+    props = segment_properties(im-im_med, segm_img, wcs=wcs.WCS(hdu_image.header))
+    
+    # Find the source in the image
+    if (find_source) & ((pclass != 'U') & (pclass != 'C')) & (len(props) > 0):
+        print 'Finding the source in the FOV...'
+        ind_src = find_bat_source(true_pos, props, 2*FWHM[filter])
+    else:
+        ind_src = None
+    
+    # Create the source aperture            
+    if ind_src is None:
+        print 'Source not found or user fixed position of source aperture.'
+        print 'Creating the source aperture centered at RA=', true_pos.ra.deg, ' and DEC=', true_pos.dec.deg        
+        ap, type = create_aperture(None, filter, pclass, coord_bat=true_pos,
+                                   wcs=wcs.WCS(hdu_image.header)) 
+            
+    else:
+        print 'Source found in the FOV!'
+        print 'Creating the source aperture centered at X=', props[ind_src].xcentroid.value, ' and Y=', props[ind_src].ycentroid.value
+        ap, type = create_aperture(props[ind_src], filter, pclass, extent=extent,
+                                   coord_bat=true_pos, wcs=wcs.WCS(hdu_image.header))
+    
+    # Create new mask based on 2-sigma threshold and remove the bat source if detected
+    print 'Creating a new mask to not include the source...'
+    thresh2 = im_med + 2.0*im_std
+    segm_img2 = detect_sources(im, thresh2, npixels=5)
+    props2 = segment_properties(im-im_med, segm_img2, wcs=wcs.WCS(hdu_image.header))
+    nanmask = np.isnan(im)
+    nanerr = np.isnan(hdu_err.data) | np.isinf(hdu_err.data)
+    
+    if len(props2) != 0:
+        ind_src2 = find_bat_source(true_pos, props2, 2*FWHM[filter])
+    else:
+        ind_src2 = None
+
+    if ind_src2 is None:
+        mask = segm_img2.astype(np.bool) | nanmask | nanerr
+    else:
+        si = segm_img2.remove_segments(ind_src2 + 1)
+        mask = si.astype(np.bool) | nanmask | nanerr
+    
+    # Run the aperture photometry
+    print 'Calculating the photometry!'
+    if (pclass != 'C'):    
+        results, apertures = herschel_aperture_photometry(ap, hdu_image, hdu_err.data,
+                                                          type, filter, pclass=pclass,
+                                                          bkg=im_med, mask=mask)
+    else:
+        results, apertures = herschel_aperture_photometry(ap, hdu_image, hdu_err.data,
+                                                          type, filter, pclass=pclass,
+                                                          bkg=im_med, mask=None)
+    type = results['type']
+    print results
+    # Plot the apertures on top of the data
+    if plot:
+        print 'Plotting the apertures used for photometry.'
+        cbat = [true_pos.ra.deg, true_pos.dec.deg]
+        
+        if (type == 'fixed'):
+            pmax = None
+        else:
+            pmax = props[ind_src].max_value + im_med
+        
+        if (pmax < im_med):
+            pmax = None
+
+        fig = plot_aperture_photometry(hdu_image, apertures, filter, global_bkg=im_med,
+                                       pixel_max=pmax, title=name+' ['+filter+']', plot_bat_loc=cbat)
+        
+        print 'All done!'
+        return results, apertures, fig
+    
+    else:
+        print 'All done!'
+        return results, apertures
     
  
 def run_bat_sources(source, filter, save_results=False, outdir=None, plot=False, results_file=None,
                     ap_file=None, save_fig=False):
- 	
- 	# File that contains the coordinates for each source
+    
+    # File that contains the coordinates for each source
     bat_info = pd.read_csv(bat_dir+'bat_info.csv', index_col=0)
     
     # File that contains the classification for each source
@@ -514,11 +623,11 @@ def run_bat_sources(source, filter, save_results=False, outdir=None, plot=False,
             # Create the source aperture            
             if ind_bat is None:
                 
-                ap, type = create_spire_aperture(None, f, pclass, coord_bat=coord_bat, wcs=wcs.WCS(hdu_image.header)) 
+                ap, type = create_aperture(None, f, pclass, coord_bat=coord_bat, wcs=wcs.WCS(hdu_image.header)) 
             
             else:
             
-                ap, type = create_spire_aperture(props[ind_bat], f, pclass, extent=3.0, coord_bat=coord_bat, wcs=wcs.WCS(hdu_image.header))
+                ap, type = create_aperture(props[ind_bat], f, pclass, extent=3.0, coord_bat=coord_bat, wcs=wcs.WCS(hdu_image.header))
             
             # Create new mask based on 3-sigma threshold and remove the bat source if detected
             thresh2 = im_med + 2.0*im_std
@@ -540,9 +649,9 @@ def run_bat_sources(source, filter, save_results=False, outdir=None, plot=False,
                 #mask = nanmask | nanerr
             
             if (pclass != 'C'):    
-                results, apertures = spire_aperture_photometry(ap, hdu_image, hdu_err.data, type, f, pclass=pclass, bkg=im_med, mask=mask)
+                results, apertures = herschel_aperture_photometry(ap, hdu_image, hdu_err.data, type, f, pclass=pclass, bkg=im_med, mask=mask)
             else:
-                results, apertures = spire_aperture_photometry(ap, hdu_image, hdu_err.data, type, f, pclass=pclass, bkg=im_med, mask=None)
+                results, apertures = herschel_aperture_photometry(ap, hdu_image, hdu_err.data, type, f, pclass=pclass, bkg=im_med, mask=None)
                 
             type = results['type']
             src_df.loc[s, f] = pd.Series(results)
