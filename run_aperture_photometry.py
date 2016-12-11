@@ -15,8 +15,7 @@ from astropy.stats import sigma_clipped_stats, gaussian_sigma_to_fwhm, gaussian_
 from astropy.convolution import Gaussian2DKernel
 
 # Photutils imports
-from photutils import detect_sources, segment_properties, aperture_photometry, remove_segments
-from photutils import detect_sources, segment_properties, aperture_photometry
+from photutils import detect_sources, source_properties, aperture_photometry
 from photutils import CircularAperture, EllipticalAperture
 from photutils import SkyCircularAperture, SkyEllipticalAperture
 from photutils import CircularAnnulus, EllipticalAnnulus
@@ -69,8 +68,9 @@ def estimate_bkg(image, clip=3.0, snr=2.0, npix=5, tol=1e-6, max_iter=10):
     segm_img = detect_sources(image, thresh, npixels=npix)
     
     # Create new mask that masks all the detected sources
-    mask = segm_img.astype(np.bool) | nanmask
-    
+    mask = np.logical_not(segm_img.data_masked.mask) | nanmask
+    plt.imshow(mask, origin='lower left')
+    plt.colorbar()
     # Re-calculate background and rms
     im_mean, im_med, im_std = sigma_clipped_stats(image, sigma=clip, mask=mask)
     
@@ -83,7 +83,7 @@ def estimate_bkg(image, clip=3.0, snr=2.0, npix=5, tol=1e-6, max_iter=10):
  
             thresh = im_med + snr*im_std
             segm_img = detect_sources(image, thresh, npixels=npix)
-            mask = segm_img.astype(np.bool) | nanmask
+            mask = np.logical_not(segm_img.data_masked.mask) | nanmask
             im_mean, im_med, im_std = sigma_clipped_stats(image, sigma=clip, mask=mask)
             perc_change = np.abs(im_med0 - im_med)/ im_med
 
@@ -182,8 +182,9 @@ def calc_bkg_rms(ap, image, type, filter, src_ap_area, mask=None, min_ap=6):
 
 def prep_image(im, filt):
     
-    if im.header['ZUNITs'] == 'MJy/sr':
-        im.data = im.data/im.header['JANSCALE']
+    if np.any(np.array(im.header.keys()) == 'ZUNITs'):
+        if im.header['ZUNITs'] == 'MJy/sr':
+            im.data = im.data/im.header['JANSCALE']
         
     im.data *= im.header['PFOV']**2/BEAM_AREAS[filt]
     im.header['BUNIT'] = 'Jy/pixel'
@@ -341,7 +342,7 @@ def herschel_aperture_photometry(ap, image, error, type, filter, pclass='E', bkg
     bkg_rms, bkg_circles = calc_bkg_rms(bkg_ap, image, type, filter, src_ap_area=ap.area(), mask=mask)
         
     # Final fluxes and errors
-    raw_flux = flux_tbl['aperture_sum'].data[0]
+    raw_flux = flux_tbl['aperture_sum'].value[0]
     bkg_flux = bkg_flux[0]*ap.area()
     bkgsub_flux = raw_flux - bkg_flux
     ap_err = flux_tbl['aperture_sum_err'].data[0]
@@ -469,7 +470,7 @@ def run_single_source(imfile, errfile, filter, true_pos, find_source=True, pclas
     # Use a 1.5 sigma threshold to detect the BAT source
     thresh = im_med + 1.5*im_std
     segm_img = detect_sources(im, thresh, npixels=5)
-    props = segment_properties(im-im_med, segm_img, wcs=wcs.WCS(hdu_image.header))
+    props = source_properties(im-im_med, segm_img, wcs=wcs.WCS(hdu_image.header))
     
     # Find the source in the image
     if (find_source) & ((pclass != 'U') & (pclass != 'C')) & (len(props) > 0):
@@ -495,7 +496,7 @@ def run_single_source(imfile, errfile, filter, true_pos, find_source=True, pclas
     print 'Creating a new mask to not include the source...'
     thresh2 = im_med + 2.0*im_std
     segm_img2 = detect_sources(im, thresh2, npixels=5)
-    props2 = segment_properties(im-im_med, segm_img2, wcs=wcs.WCS(hdu_image.header))
+    props2 = source_properties(im-im_med, segm_img2, wcs=wcs.WCS(hdu_image.header))
     nanmask = np.isnan(im)
     nanerr = np.isnan(hdu_err.data) | np.isinf(hdu_err.data)
     
@@ -505,10 +506,10 @@ def run_single_source(imfile, errfile, filter, true_pos, find_source=True, pclas
         ind_src2 = None
 
     if ind_src2 is None:
-        mask = segm_img2.astype(np.bool) | nanmask | nanerr
+        mask = np.logical_not(segm_img2.data_masked.mask) | nanmask | nanerr
     else:
-        si = segm_img2.remove_segments(ind_src2 + 1)
-        mask = si.astype(np.bool) | nanmask | nanerr
+        segm_img2.remove_labels(ind_src2 + 1)
+        mask = np.logical_not(segm_img2.data_masked.mask) | nanmask | nanerr
     
     # Run the aperture photometry
     print 'Calculating the photometry!'
@@ -600,13 +601,13 @@ def run_bat_sources(source, filter, save_results=False, outdir=None, plot=False,
 #            if pclass == 'E':
             thresh = im_med + 2.0*im_std
             segm_img = detect_sources(im, thresh, npixels=5)
-            props = segment_properties(im-im_med, segm_img, wcs=wcs.WCS(hdu_image.header))
+            props = source_properties(im-im_med, segm_img, wcs=wcs.WCS(hdu_image.header))
 #             elif pclass == 'P':
 #                 thresh = im_med + 3.0*im_std
 #                 sigma = FWHM[f]/PIX_SIZES[f] * gaussian_fwhm_to_sigma
 #                 kernel = Gaussian2DKernel(sigma, x_size=3, y_size=3)
 #                 segm_img = detect_sources(im, thresh, npixels=5, filter_kernel=kernel)
-#                 props = segment_properties(im-im_med, segm_img, wcs=wcs.WCS(hdu_image.header))
+#                 props = source_properties(im-im_med, segm_img, wcs=wcs.WCS(hdu_image.header))
             
             # Find the BAT source in the properties list
             ra_bat = bat_info.loc[s, 'RA_(J2000)']
@@ -632,7 +633,7 @@ def run_bat_sources(source, filter, save_results=False, outdir=None, plot=False,
             # Create new mask based on 3-sigma threshold and remove the bat source if detected
             thresh2 = im_med + 2.0*im_std
             segm_img2 = detect_sources(im, thresh2, npixels=5)
-            props2 = segment_properties(im-im_med, segm_img2, wcs=wcs.WCS(hdu_image.header))
+            props2 = source_properties(im-im_med, segm_img2, wcs=wcs.WCS(hdu_image.header))
             nanmask = np.isnan(im)
             nanerr = np.isnan(hdu_err.data) | np.isinf(hdu_err.data)
             
@@ -642,10 +643,10 @@ def run_bat_sources(source, filter, save_results=False, outdir=None, plot=False,
                 ind_bat2 = None
     
             if ind_bat2 is None:
-                mask = segm_img2.astype(np.bool) | nanmask | nanerr
+                mask = np.logical_not(segm_img2.data_masked.mask) | nanmask | nanerr
             else:
-                si = remove_segments(segm_img2, ind_bat2 + 1)
-                mask = si.astype(np.bool) | nanmask | nanerr
+                si = segm_img2.remove_labels(ind_bat2 + 1)
+                mask = np.logical_not(si.data_masked.mask) | nanmask | nanerr
                 #mask = nanmask | nanerr
             
             if (pclass != 'C'):    
